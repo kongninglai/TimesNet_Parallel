@@ -1,0 +1,12 @@
+imputation_ETTh1_mask_0.125_TimesNet_ETTh1_ftM_sl96_ll0_pl0_dm16_nh8_el2_dl1_df32_expand2_dc4_fc3_ebtimeF_dtTrue_Exp_0  
+mse:0.06168380007147789, mae:0.1678735315799713
+
+imputation_ETTh1_mask_0.25_TimesNet_ETTh1_ftM_sl96_ll0_pl0_dm16_nh8_el2_dl1_df32_expand2_dc4_fc3_ebtimeF_dtTrue_Exp_0  
+mse:0.08020387589931488, mae:0.19085118174552917
+
+imputation_ETTh1_mask_0.375_TimesNet_ETTh1_ftM_sl96_ll0_pl0_dm16_nh8_el2_dl1_df32_expand2_dc4_fc3_ebtimeF_dtTrue_Exp_0  
+mse:0.09701244533061981, mae:0.20864985883235931
+
+imputation_ETTh1_mask_0.5_TimesNet_ETTh1_ftM_sl96_ll0_pl0_dm16_nh8_el2_dl1_df32_expand2_dc4_fc3_ebtimeF_dtTrue_Exp_0  
+mse:0.11622809618711472, mae:0.22635520994663239
+
