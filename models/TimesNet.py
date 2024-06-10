@@ -6,7 +6,8 @@ from layers.Embed import DataEmbedding
 from layers.Conv_Blocks import Inception_Block_V1
 import time
 import csv
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 def FFT_for_Period(x, k=2):
     # [B, T, C]
     xf = torch.fft.rfft(x, dim=1)
@@ -34,48 +35,141 @@ class TimesBlock(nn.Module):
                                num_kernels=configs.num_kernels)
         )
 
+    # def forward(self, x):
+    #     B, T, N = x.size()
+    #     period_list, period_weight = FFT_for_Period(x, self.k)
+
+    #     res = []
+    #     start_time = time.time()
+    #     for i in range(self.k):
+    #         period = period_list[i]
+    #         # padding
+    #         if (self.seq_len + self.pred_len) % period != 0:
+    #             length = (
+    #                              ((self.seq_len + self.pred_len) // period) + 1) * period
+    #             padding = torch.zeros([x.shape[0], (length - (self.seq_len + self.pred_len)), x.shape[2]]).to(x.device)
+    #             out = torch.cat([x, padding], dim=1)
+    #         else:
+    #             length = (self.seq_len + self.pred_len)
+    #             out = x
+    #         # reshape
+    #         out = out.reshape(B, length // period, period,
+    #                           N).permute(0, 3, 1, 2).contiguous()
+    #         # 2D conv: from 1d Variation to 2d Variation
+    #         out = self.conv(out)
+    #         # reshape back
+    #         out = out.permute(0, 2, 3, 1).reshape(B, -1, N)
+    #         res.append(out[:, :(self.seq_len + self.pred_len), :])
+    #     end_time = time.time()
+    #     time_taken = end_time - start_time
+        
+    #     with open('time_log.csv', mode='a', newline='') as file:
+    #         writer = csv.writer(file)
+    #         writer.writerow([time_taken])
+            
+    #     res = torch.stack(res, dim=-1)
+    #     # adaptive aggregation
+    #     period_weight = F.softmax(period_weight, dim=1)
+    #     period_weight = period_weight.unsqueeze(
+    #         1).unsqueeze(1).repeat(1, T, N, 1)
+    #     res = torch.sum(res * period_weight, -1)
+    #     # residual connection
+    #     res = res + x
+    #     return res
+
+    # Multi process
+    def process_period(self, x, period, period_index):
+        B, T, N = x.size()
+        if (self.seq_len + self.pred_len) % period != 0:
+            length = (((self.seq_len + self.pred_len) // period) + 1) * period
+            padding = torch.zeros([x.shape[0], (length - (self.seq_len + self.pred_len)), x.shape[2]]).to(x.device)
+            out = torch.cat([x, padding], dim=1)
+        else:
+            length = (self.seq_len + self.pred_len)
+            out = x
+        # reshape
+        out = out.reshape(B, length // period, period, N).permute(0, 3, 1, 2).contiguous()
+        # 2D conv: from 1d Variation to 2d Variation
+        out = self.conv(out)
+        # reshape back
+        out = out.permute(0, 2, 3, 1).reshape(B, -1, N)
+        return out[:, :(self.seq_len + self.pred_len), :]
+
     def forward(self, x):
         B, T, N = x.size()
         period_list, period_weight = FFT_for_Period(x, self.k)
 
         res = []
-        start_time = time.time()
-        for i in range(self.k):
-            period = period_list[i]
-            # padding
-            if (self.seq_len + self.pred_len) % period != 0:
-                length = (
-                                 ((self.seq_len + self.pred_len) // period) + 1) * period
-                padding = torch.zeros([x.shape[0], (length - (self.seq_len + self.pred_len)), x.shape[2]]).to(x.device)
-                out = torch.cat([x, padding], dim=1)
-            else:
-                length = (self.seq_len + self.pred_len)
-                out = x
-            # reshape
-            out = out.reshape(B, length // period, period,
-                              N).permute(0, 3, 1, 2).contiguous()
-            # 2D conv: from 1d Variation to 2d Variation
-            out = self.conv(out)
-            # reshape back
-            out = out.permute(0, 2, 3, 1).reshape(B, -1, N)
-            res.append(out[:, :(self.seq_len + self.pred_len), :])
-        end_time = time.time()
+        start_time = time.time()  # Start time recording
+
+        with ProcessPoolExecutor(max_workers=self.k) as executor:
+            futures = [executor.submit(self.process_period, x.detach(), period_list[i], i) for i in range(self.k)]
+            for future in as_completed(futures):
+                res.append(future.result())
+
+        end_time = time.time()  # End time recording
         time_taken = end_time - start_time
-        print(f"Time taken by for loop: {time_taken}")
-        
+        # Record time to CSV file
         with open('time_log.csv', mode='a', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([time_taken])
-            
+
         res = torch.stack(res, dim=-1)
         # adaptive aggregation
         period_weight = F.softmax(period_weight, dim=1)
-        period_weight = period_weight.unsqueeze(
-            1).unsqueeze(1).repeat(1, T, N, 1)
+        period_weight = period_weight.unsqueeze(1).unsqueeze(1).repeat(1, T, N, 1)
         res = torch.sum(res * period_weight, -1)
         # residual connection
         res = res + x
         return res
+    
+    # Multi thread
+    # def process_period(self, x, period, period_index):
+    #     B, T, N = x.size()
+    #     if (self.seq_len + self.pred_len) % period != 0:
+    #         length = (((self.seq_len + self.pred_len) // period) + 1) * period
+    #         padding = torch.zeros([x.shape[0], (length - (self.seq_len + self.pred_len)), x.shape[2]]).to(x.device)
+    #         out = torch.cat([x, padding], dim=1)
+    #     else:
+    #         length = (self.seq_len + self.pred_len)
+    #         out = x
+    #     # reshape
+    #     out = out.reshape(B, length // period, period, N).permute(0, 3, 1, 2).contiguous()
+    #     # 2D conv: from 1d Variation to 2d Variation
+    #     out = self.conv(out)
+    #     # reshape back
+    #     out = out.permute(0, 2, 3, 1).reshape(B, -1, N)
+    #     return out[:, :(self.seq_len + self.pred_len), :]
+
+    # def forward(self, x):
+    #     B, T, N = x.size()
+    #     period_list, period_weight = FFT_for_Period(x, self.k)
+
+    #     res = []
+    #     start_time = time.time()  # Start time recording
+
+    #     with ThreadPoolExecutor(max_workers=self.k) as executor:
+    #         futures = [executor.submit(self.process_period, x, period_list[i], i) for i in range(self.k)]
+    #         for future in as_completed(futures):
+    #             res.append(future.result())
+
+    #     end_time = time.time()  # End time recording
+    #     time_taken = end_time - start_time
+        
+
+    #     # Record time to CSV file
+    #     with open('time_log_multithread.csv', mode='a', newline='') as file:
+    #         writer = csv.writer(file)
+    #         writer.writerow([time_taken])
+
+    #     res = torch.stack(res, dim=-1)
+    #     # adaptive aggregation
+    #     period_weight = F.softmax(period_weight, dim=1)
+    #     period_weight = period_weight.unsqueeze(1).unsqueeze(1).repeat(1, T, N, 1)
+    #     res = torch.sum(res * period_weight, -1)
+    #     # residual connection
+    #     res = res + x
+    #     return res
 
 
 class Model(nn.Module):
